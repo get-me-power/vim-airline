@@ -86,63 +86,67 @@ let s:sha1size = get(g:, 'airline#extensions#branch#sha1_len', 7)
 
 function! s:update_git_branch()
   call airline#util#ignore_next_focusgain()
-  if airline#util#has_fugitive()
-    call s:config_fugitive_branch()
-  elseif airline#util#has_gina()
-    call s:config_gina_branch()
-  else
-    let s:vcs_config['git'].branch = ''
-    return
-  endif
-endfunction
-
-function! s:config_fugitive_branch() abort
-  let s:vcs_config['git'].branch =  FugitiveHead(s:sha1size)
+  let s:vcs_config['git'].branch = s:gitbranch_name()
   if s:vcs_config['git'].branch is# 'master' &&
         \ airline#util#winwidth() < 81
     " Shorten default a bit
     let s:vcs_config['git'].branch='mas'
   endif
-endfunction
-
-function! s:config_gina_branch() abort
-  try
-    let g:gina#component#repo#commit_length = s:sha1size
-    let s:vcs_config['git'].branch = gina#component#repo#branch()
-  catch
-  endtry
-  if s:vcs_config['git'].branch is# 'master' &&
-        \ airline#util#winwidth() < 81
-    " Shorten default a bit
-    let s:vcs_config['git'].branch='mas'
-  endif
+  return
 endfunction
 
 function! s:display_git_branch()
-  let name = b:buffer_vcs_config['git'].branch
-  try
-    let commit = matchstr(FugitiveParse()[0], '^\x\+')
+  return b:buffer_vcs_config['git'].branch
+endfunction
 
-    if has_key(s:names, commit)
-      let name = get(s:names, commit)."(".name.")"
-    elseif !empty(commit)
-      if exists('*FugitiveExecute')
-        let ref = FugitiveExecute(['describe', '--all', '--exact-match', commit], bufnr('')).stdout[0]
-      else
-        noautocmd let ref = fugitive#repo().git_chomp('describe', '--all', '--exact-match', commit)
-        if ref =~# ':'
-          let ref = ''
-        endif
-      endif
-      if !empty(ref)
-        let name = s:format_name(substitute(ref, '\v\C^%(heads/|remotes/|tags/)=','',''))."(".name.")"
-      else
-        let name = matchstr(commit, '.\{'.s:sha1size.'}')."(".name.")"
-      endif
+function! s:gitbranch_name() abort
+  if get(b:, 'gitbranch_pwd', '') !=# expand('%:p:h') || !has_key(b:, 'gitbranch_path')
+    call s:gitbranch_detect(expand('%:p:h'))
+  endif
+  if has_key(b:, 'gitbranch_path') && filereadable(b:gitbranch_path)
+    let branch = get(readfile(b:gitbranch_path), 0, '')
+    if branch =~# '^ref: '
+      return substitute(branch, '^ref: \%(refs/\%(heads/\|remotes/\|tags/\)\=\)\=', '', '')
+    elseif branch =~# '^\x\{20\}'
+      return branch[:6]
     endif
-  catch
-  endtry
-  return name
+  endif
+  return ''
+endfunction
+
+function! s:gitbranch_dir(path) abort
+  let path = a:path
+  let prev = ''
+  let git_modules = path =~# '/\.git/modules/'
+  while path !=# prev
+    let dir = path . '/.git'
+    let type = getftype(dir)
+    if type ==# 'dir' && isdirectory(dir.'/objects') && isdirectory(dir.'/refs') && getfsize(dir.'/HEAD') > 10
+      return dir
+    elseif type ==# 'file'
+      let reldir = get(readfile(dir), 0, '')
+      if reldir =~# '^gitdir: '
+        return simplify(path . '/' . reldir[8:])
+      endif
+    elseif git_modules && isdirectory(path.'/objects') && isdirectory(path.'/refs') && getfsize(path.'/HEAD') > 10
+      return path
+    endif
+    let prev = path
+    let path = fnamemodify(path, ':h')
+  endwhile
+  return ''
+endfunction
+
+function! s:gitbranch_detect(path) abort
+  unlet! b:gitbranch_path
+  let b:gitbranch_pwd = expand('%:p:h')
+  let dir = s:gitbranch_dir(a:path)
+  if dir !=# ''
+    let path = dir . '/HEAD'
+    if filereadable(path)
+      let b:gitbranch_path = path
+    endif
+  endif
 endfunction
 
 function! s:update_hg_branch()
@@ -225,7 +229,7 @@ function! s:update_untracked()
   for vcs in keys(s:vcs_config)
     " only check, for git, if fugitive is installed
     " and for 'hg' if lawrencium is installed, else skip
-    if vcs is# 'git' && (!airline#util#has_fugitive() && !airline#util#has_gina())
+    if vcs is# 'git'
       continue
     elseif vcs is# 'mercurial' && !airline#util#has_lawrencium()
       continue

@@ -1,0 +1,6 @@
+Describe branch.vim
+  It branch
+    let branch = systemlist('git rev-parse --abbrev-ref HEAD')
+    Assert Equals(branch[0], airline#extensions#branch#get_head())
+  End
+End
